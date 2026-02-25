@@ -332,28 +332,41 @@ local function resolveModelName(button)
 	local attrName = button:GetAttribute("ModelName")
 	if modelExists(attrName) then return attrName end
 
-	local parent = button.Parent
-	if parent and parent:IsA("Frame") and modelExists(parent.Name) then
-		return parent.Name
+	local isTextLabel = button:IsA("TextLabel")
+	local textValue = button:IsA("TextButton") and button.Text
+		or isTextLabel and button.Text
+		or nil
+
+	local function normalize(value)
+		if type(value) ~= "string" then return nil end
+		return value:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+	end
+
+	-- Fallback para etiquetas de catálogo:
+	-- si un TextLabel es "Droppers", "MarpleDroppers" o "MarbleDroppers",
+	-- usamos Dropper1 (Models/Droppers/Dropper1).
+	if isTextLabel and modelExists("Dropper1") then
+		local normalizedName = normalize(button.Name)
+		local normalizedText = normalize(textValue)
+		if normalizedName == "droppers"
+			or normalizedText == "droppers"
+			or normalizedName == "marpledroppers"
+			or normalizedText == "marpledroppers"
+			or normalizedName == "marbledroppers"
+			or normalizedText == "marbledroppers"
+		then
+			return "Dropper1"
+		end
 	end
 
 	if modelExists(button.Name) then return button.Name end
-
-	local textValue = button:IsA("TextButton") and button.Text
-		or button:IsA("TextLabel") and button.Text
-		or nil
 	if textValue and modelExists(textValue) then
 		return textValue
 	end
 
-	-- Fallback para tu prueba actual:
-	-- si un TextLabel dice "Droppers", usamos Dropper1 (Models/Droppers/Dropper1).
-	if button:IsA("TextLabel") then
-		if button.Name == "Droppers" or button.Text == "Droppers" then
-			if modelExists("Dropper1") then
-				return "Dropper1"
-			end
-		end
+	local parent = button.Parent
+	if parent and parent:IsA("Frame") and modelExists(parent.Name) then
+		return parent.Name
 	end
 
 	return nil

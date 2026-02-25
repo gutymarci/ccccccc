@@ -63,7 +63,7 @@ if not gui or not gui:IsA("ScreenGui") then
 end
 
 local frame = gui:WaitForChild("Frame")
-local scrollingFrame = frame:WaitForChild("ScrollingFrame")
+local scrollingDropper = frame:WaitForChild("ScrollingDropper")
 local deleteButton = frame:FindFirstChild("Delete", true)
 local copyButton = frame:FindFirstChild("Copy", true)
 local moveButton = frame:FindFirstChild("Move", true)
@@ -329,61 +329,37 @@ local function modelExists(modelName)
 end
 
 local function resolveModelName(button)
-	local attrName = button:GetAttribute("ModelName")
-	if modelExists(attrName) then return attrName end
-
-	local parent = button.Parent
-	if parent and parent:IsA("Frame") and modelExists(parent.Name) then
-		return parent.Name
+	if not button then return nil end
+	if not (button:IsA("TextButton") or button:IsA("ImageButton")) then
+		return nil
 	end
 
-	if modelExists(button.Name) then return button.Name end
+	-- Solo se fija en el Name del botón
+	local modelName = button.Name
 
-	local textValue = button:IsA("TextButton") and button.Text
-		or button:IsA("TextLabel") and button.Text
-		or nil
-	if textValue and modelExists(textValue) then
-		return textValue
-	end
-
-	-- Fallback para etiquetas de catálogo:
-	-- si un TextLabel es "Droppers" o "MarpleDroppers",
-	-- usamos Dropper1 (Models/Droppers/Dropper1).
-	if button:IsA("TextLabel") then
-		if button.Name == "Droppers"
-			or button.Text == "Droppers"
-			or button.Name == "MarpleDroppers"
-			or button.Text == "MarpleDroppers"
-		then
-			if modelExists("Dropper1") then
-				return "Dropper1"
-			end
-		end
+	-- Verifica que el modelo exista en Models
+	if modelExists(modelName) then
+		return modelName
 	end
 
 	return nil
 end
 
-for _, ui in ipairs(scrollingFrame:GetDescendants()) do
-	if ui:IsA("ImageButton") or ui:IsA("TextButton") then
-		ui.Activated:Connect(function()
-			local modelName = resolveModelName(ui)
-			if modelName then
-				startPlacement(modelName)
-			end
-		end)
-	elseif ui:IsA("TextLabel") then
-		-- Permite usar TextLabel como selector rápido (ej. label "Droppers").
-		ui.Active = true
-		ui.InputBegan:Connect(function(input)
-			if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-			local modelName = resolveModelName(ui)
-			if modelName then
-				startPlacement(modelName)
-			end
-		end)
+
+local function connectDropperSelectors(container)
+	for _, ui in ipairs(container:GetDescendants()) do
+		if ui:IsA("ImageButton") or ui:IsA("TextButton") then
+			ui.Activated:Connect(function()
+				local modelName = resolveModelName(ui)
+				if modelName then
+					startPlacement(modelName)
+				end
+			end)
+		end
 	end
 end
+
+connectDropperSelectors(scrollingDropper)
 
 local function connectToolButton(button, modeName)
 	if not button then return end

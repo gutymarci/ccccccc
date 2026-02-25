@@ -367,9 +367,19 @@ local function resolveModelName(button)
 		return textValue
 	end
 
-	local parent = button.Parent
-	if parent and parent:IsA("Frame") and modelExists(parent.Name) then
-		return parent.Name
+	-- Fallback para etiquetas de catálogo:
+	-- si un TextLabel es "Droppers" o "MarpleDroppers",
+	-- usamos Dropper1 (Models/Droppers/Dropper1).
+	if button:IsA("TextLabel") then
+		if button.Name == "Droppers"
+			or button.Text == "Droppers"
+			or button.Name == "MarpleDroppers"
+			or button.Text == "MarpleDroppers"
+		then
+			if modelExists("Dropper1") then
+				return "Dropper1"
+			end
+		end
 	end
 
 	return nil

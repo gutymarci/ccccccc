@@ -63,7 +63,10 @@ if not gui or not gui:IsA("ScreenGui") then
 end
 
 local frame = gui:WaitForChild("Frame")
-local scrollingFrame = frame:WaitForChild("ScrollingFrame")
+local scrollingFrame = frame:FindFirstChild("ScrollingFrame") or gui:FindFirstChild("ScrollingFrame", true)
+local scrollingDropper = frame:FindFirstChild("ScrollingDropper") or gui:FindFirstChild("ScrollingDropper", true)
+local generalCategoryButton = gui:FindFirstChild("TextButton")
+local droppersCategoryButton = gui:FindFirstChild("MarpleDroppers")
 local deleteButton = frame:FindFirstChild("Delete", true)
 local copyButton = frame:FindFirstChild("Copy", true)
 local moveButton = frame:FindFirstChild("Move", true)
@@ -329,62 +332,98 @@ local function modelExists(modelName)
 end
 
 local function resolveModelName(button)
-	local attrName = button:GetAttribute("ModelName")
-	if modelExists(attrName) then return attrName end
+	if not button then return nil end
 
-	local parent = button.Parent
-	if parent and parent:IsA("Frame") and modelExists(parent.Name) then
-		return parent.Name
+	-- Primero intentamos obtener un atributo explícito
+	local attrName = button:GetAttribute("ModelName")
+	if attrName and modelExists(attrName) then
+		return attrName
 	end
 
-	if modelExists(button.Name) then return button.Name end
-
-	local textValue = button:IsA("TextButton") and button.Text
-		or button:IsA("TextLabel") and button.Text
-		or nil
+	-- Si es TextButton o TextLabel, usamos el texto
+	local textValue = (button:IsA("TextButton") or button:IsA("TextLabel")) and button.Text or nil
 	if textValue and modelExists(textValue) then
 		return textValue
 	end
 
-	-- Fallback para etiquetas de catálogo:
-	-- si un TextLabel es "Droppers" o "MarpleDroppers",
-	-- usamos Dropper1 (Models/Droppers/Dropper1).
-	if button:IsA("TextLabel") then
-		if button.Name == "Droppers"
-			or button.Text == "Droppers"
-			or button.Name == "MarpleDroppers"
-			or button.Text == "MarpleDroppers"
-		then
-			if modelExists("Dropper1") then
-				return "Dropper1"
-			end
-		end
+	-- Finalmente, intentamos con el Name del botón
+	if modelExists(button.Name) then
+		return button.Name
 	end
 
 	return nil
 end
 
-for _, ui in ipairs(scrollingFrame:GetDescendants()) do
-	if ui:IsA("ImageButton") or ui:IsA("TextButton") then
-		ui.Activated:Connect(function()
-			local modelName = resolveModelName(ui)
-			if modelName then
-				startPlacement(modelName)
-			end
-		end)
-	elseif ui:IsA("TextLabel") then
-		-- Permite usar TextLabel como selector rápido (ej. label "Droppers").
-		ui.Active = true
-		ui.InputBegan:Connect(function(input)
+
+local function connectPlacementSelectors(container)
+	if not container or not container:IsA("GuiObject") then return end
+
+	for _, ui in ipairs(container:GetDescendants()) do
+		if ui:IsA("ImageButton") or ui:IsA("TextButton") then
+			ui.Activated:Connect(function()
+				local modelName = resolveModelName(ui)
+				if modelName then
+					startPlacement(modelName)
+				end
+			end)
+		elseif ui:IsA("TextLabel") then
+			-- Permite usar TextLabel como selector rápido (ej. label "Droppers").
+			ui.Active = true
+			ui.InputBegan:Connect(function(input)
+				if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+				local modelName = resolveModelName(ui)
+				if modelName then
+					startPlacement(modelName)
+				end
+			end)
+		end
+	end
+end
+
+local function setActiveCatalog(showGeneral)
+	local hasGeneralCatalog = scrollingFrame and scrollingFrame:IsA("GuiObject")
+	if hasGeneralCatalog then
+		scrollingFrame.Visible = showGeneral
+	end
+
+	if scrollingDropper and scrollingDropper:IsA("GuiObject") then
+		if hasGeneralCatalog then
+			scrollingDropper.Visible = not showGeneral
+		else
+			-- Si no existe catálogo general, dejamos visible el de droppers.
+			scrollingDropper.Visible = true
+		end
+	end
+end
+
+local function connectCategoryButton(button, onActivated)
+	if not button then return end
+	if button:IsA("TextButton") or button:IsA("ImageButton") then
+		button.Activated:Connect(onActivated)
+		return
+	end
+	if button:IsA("TextLabel") then
+		button.Active = true
+		button.InputBegan:Connect(function(input)
 			if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-			local modelName = resolveModelName(ui)
-			if modelName then
-				startPlacement(modelName)
-			end
+			onActivated()
 		end)
 	end
 end
 
+connectPlacementSelectors(scrollingFrame)
+connectPlacementSelectors(scrollingDropper)
+setActiveCatalog(true)
+
+connectCategoryButton(generalCategoryButton, function()
+	if not isBuildModeEnabled() then return end
+	setActiveCatalog(true)
+end)
+
+connectCategoryButton(droppersCategoryButton, function()
+	if not isBuildModeEnabled() then return end
+	setActiveCatalog(false)
+end)
 local function connectToolButton(button, modeName)
 	if not button then return end
 	if not (button:IsA("TextButton") or button:IsA("ImageButton")) then return end

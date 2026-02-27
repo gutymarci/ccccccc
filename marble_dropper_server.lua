@@ -31,6 +31,7 @@ end
 local MarbleModule = require(marbleModuleScript)
 local DropperRewards = require(ReplicatedStorage:WaitForChild("DropperRewards"))
 local DROP_INTERVAL = 2 -- segundos entre marbles por dropper
+local COINS_PER_MARBLE = 1
 
 local activeDroppers = {}
 

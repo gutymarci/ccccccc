@@ -5,13 +5,11 @@
 ##################################################
 --]]
 
--- Sandbox Local Script (cliente)
--- Rotación horizontal fija: tecla R (+90° eje Y).
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local player = Players.LocalPlayer
 local secureRemotesFolder = ReplicatedStorage:FindFirstChild("SecureRemotes")
@@ -32,12 +30,12 @@ local function getRemoteEvent(remoteName)
 	return nil
 end
 
--- Nombres canónicos según tu setup.
 local placeEvent = getRemoteEvent("PlaceObject")
 local deleteEvent = getRemoteEvent("DeleteObject")
 
 local modelsFolder = ReplicatedStorage:WaitForChild("Models")
 local ObjectCosts = require(ReplicatedStorage:WaitForChild("ObjectCosts"))
+local ObjectImages = require(ReplicatedStorage:WaitForChild("ObjectImages"))
 
 if not placeEvent then
 	warn("[Sandbox] PlaceObject remote not found")
@@ -57,19 +55,37 @@ local function findModelTemplate(modelName)
 	return nil
 end
 
+-- Preload images to ensure they're loaded before UI is complete
+local imagesToPreload = {}
+for _, model in ipairs(modelsFolder:GetChildren()) do
+	local modelName = model.Name
+	local imageId = ObjectImages[modelName]
+	if imageId and imageId ~= "" then
+		table.insert(imagesToPreload, imageId)
+	end
+end
+
+if #imagesToPreload > 0 then
+	ContentProvider:PreloadAsync(imagesToPreload)
+end
+
 local gui = script.Parent
 if not gui or not gui:IsA("ScreenGui") then
 	gui = player:WaitForChild("PlayerGui"):WaitForChild("BuildModeMenu")
 end
 
 local frame = gui:WaitForChild("Frame")
-local scrollingFrame = frame:WaitForChild("ScrollingFrame")
-local deleteButton = frame:FindFirstChild("Delete", true)
-local copyButton = frame:FindFirstChild("Copy", true)
-local moveButton = frame:FindFirstChild("Move", true)
-local paintButton = frame:FindFirstChild("Paint", true)
+local scrollingDropper = frame:WaitForChild("ScrollingDropper")
+local scrollingObject = frame:FindFirstChild("ScrollingObject")
+
+local deleteButton = gui:FindFirstChild("Delete")
+local copyButton = gui:FindFirstChild("Copy")
+local moveButton = gui:FindFirstChild("Move")
+local paintButton = gui:FindFirstChild("Paint")
+
 local mouse = player:GetMouse()
 
+-- Variables de estado
 local activeGhost, currentModelName, renderConn, activeIsValid = nil, nil, nil, false
 local currentRotation = 0
 local activeToolMode = "place"
@@ -80,7 +96,7 @@ local gridFolder = Instance.new("Folder")
 gridFolder.Name = "PlacementGrid"
 gridFolder.Parent = workspace
 
-local BASE_GRID_SIZE = 8
+local BASE_GRID_SIZE = 4
 local SUB_GRID_SIZE = BASE_GRID_SIZE / 2
 
 local function isBuildModeEnabled()
@@ -90,17 +106,14 @@ end
 local function getPlayerBase()
 	local map = workspace:FindFirstChild("Map")
 	if not map then return nil end
-
 	local foundation = map:FindFirstChild("FoundationFolder")
 	if not foundation then return nil end
-
 	for _, baseFolder in ipairs(foundation:GetChildren()) do
 		local ownerUserId = baseFolder:GetAttribute("OwnerUserId")
 		if type(ownerUserId) == "number" and ownerUserId == player.UserId then
 			return baseFolder
 		end
 	end
-
 	return nil
 end
 
@@ -118,10 +131,8 @@ local function resolvePlacedModelFromTarget(target)
 	if not baseFolder then return nil end
 	local placedFolder = baseFolder:FindFirstChild("PlacedFolder")
 	if not placedFolder then return nil end
-
 	local model = target:FindFirstAncestorOfClass("Model")
-	if not model then return nil end
-	if model:IsDescendantOf(placedFolder) then
+	if model and model:IsDescendantOf(placedFolder) then
 		return model
 	end
 	return nil
@@ -130,7 +141,6 @@ end
 local function selectModel(model)
 	clearSelection()
 	if not model then return end
-
 	selectedModel = model
 	selectedHighlight = Instance.new("Highlight")
 	selectedHighlight.Name = "DeleteSelectionHighlight"
@@ -145,7 +155,6 @@ end
 
 local function drawGrid(basePart, cellSize)
 	gridFolder:ClearAllChildren()
-
 	local baseSize = basePart.Size
 	local basePos = basePart.Position
 	local baseMinX = basePos.X - baseSize.X / 2
@@ -179,12 +188,10 @@ local function stopPlacement()
 		renderConn:Disconnect()
 		renderConn = nil
 	end
-
 	if activeGhost then
 		activeGhost:Destroy()
 		activeGhost = nil
 	end
-
 	currentModelName = nil
 	activeIsValid = false
 	gridFolder:ClearAllChildren()
@@ -205,22 +212,34 @@ local function isDeleteMode()
 	return activeToolMode == "delete"
 end
 
-local function startDeleteMode()
-	if not isBuildModeEnabled() then
-		return
+local function resolveModelName(uiElement)
+	local attrName = uiElement:GetAttribute("ModelName")
+	if attrName and findModelTemplate(attrName) then
+		return attrName
 	end
-	setToolMode("delete")
+
+	if uiElement:IsA("TextLabel") and uiElement.Text then
+		local text = uiElement.Text
+		if findModelTemplate(text) then
+			return text
+		end
+	end
+
+	if findModelTemplate(uiElement.Name) then
+		return uiElement.Name
+	end
+
+	local parent = uiElement.Parent
+	if parent and parent:IsA("Frame") and findModelTemplate(parent.Name) then
+		return parent.Name
+	end
+
+	return nil
 end
 
 local function startPlacement(modelName)
-	if not isBuildModeEnabled() then
-		return
-	end
-
-	if activeGhost then
-		stopPlacement()
-	end
-
+	if not isBuildModeEnabled() then return end
+	if activeGhost then stopPlacement() end
 	setToolMode("place")
 
 	local template = findModelTemplate(modelName)
@@ -228,22 +247,12 @@ local function startPlacement(modelName)
 
 	local baseFolder = getPlayerBase()
 	if not baseFolder then return end
-
 	local basePart = baseFolder:FindFirstChild("Base")
 	if not basePart or not basePart:IsA("BasePart") then return end
 
 	drawGrid(basePart, SUB_GRID_SIZE)
 
 	local ghost = template:Clone()
-	for _, p in ipairs(ghost:GetDescendants()) do
-		if p:IsA("BasePart") then
-			p.CanCollide = false
-			p.Anchored = true
-			p.Transparency = 0.5
-			p.CastShadow = false
-		end
-	end
-
 	if not ghost.PrimaryPart then
 		for _, p in ipairs(ghost:GetDescendants()) do
 			if p:IsA("BasePart") then
@@ -252,7 +261,6 @@ local function startPlacement(modelName)
 			end
 		end
 	end
-
 	if not ghost.PrimaryPart then return end
 
 	ghost.Parent = workspace
@@ -273,7 +281,6 @@ local function startPlacement(modelName)
 			stopPlacement()
 			return
 		end
-
 		local hit = mouse.Hit
 		if not hit then return end
 
@@ -313,77 +320,164 @@ local function startPlacement(modelName)
 		end
 
 		activeIsValid = valid
-
 		for _, p in ipairs(activeGhost:GetDescendants()) do
 			if p:IsA("BasePart") then
 				p.Color = valid and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
 			end
 		end
-
 		activeGhost:SetPrimaryPartCFrame(finalCFrame)
 	end)
 end
 
-local function modelExists(modelName)
-	return findModelTemplate(modelName) ~= nil
-end
+local function populateScrollFromFolder(scrollFrame, folderName)
+	scrollFrame:ClearAllChildren()
 
-local function resolveModelName(button)
-	local attrName = button:GetAttribute("ModelName")
-	if modelExists(attrName) then return attrName end
+	local layout = Instance.new("UIListLayout")
+	layout.Parent = scrollFrame
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.VerticalAlignment = Enum.VerticalAlignment.Top
+	layout.Padding = UDim.new(0, 0)
 
-	local parent = button.Parent
-	if parent and parent:IsA("Frame") and modelExists(parent.Name) then
-		return parent.Name
-	end
-
-	if modelExists(button.Name) then return button.Name end
-
-	local textValue = button:IsA("TextButton") and button.Text
-		or button:IsA("TextLabel") and button.Text
-		or nil
-	if textValue and modelExists(textValue) then
-		return textValue
-	end
-
-	-- Fallback para tu prueba actual:
-	-- si un TextLabel dice "Droppers", usamos Dropper1 (Models/Droppers/Dropper1).
-	if button:IsA("TextLabel") then
-		if button.Name == "Droppers" or button.Text == "Droppers" then
-			if modelExists("Dropper1") then
-				return "Dropper1"
+	local function updateCanvas()
+		local totalWidth = 0
+		for _, child in ipairs(scrollFrame:GetChildren()) do
+			if child:IsA("GuiObject") and child ~= layout then
+				totalWidth = totalWidth + child.AbsoluteSize.X + layout.Padding.Offset
 			end
+		end
+		scrollFrame.CanvasSize = UDim2.new(0, totalWidth, 0, 0)
+	end
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+
+	local folder = modelsFolder:FindFirstChild(folderName)
+	if not folder then
+		warn("No se encontró la carpeta:", folderName)
+		return
+	end
+
+	for _, model in ipairs(folder:GetChildren()) do
+		if model:IsA("Model") then
+			local modelName = model.Name
+			local cost = ObjectCosts[modelName] or 0
+			local imageId = ObjectImages[modelName] or ""
+
+			local itemFrame = Instance.new("Frame")
+			itemFrame.Name = modelName
+			itemFrame.Size = UDim2.new(0, 120, 0, 140)
+			itemFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			itemFrame.BackgroundTransparency = 0.5
+			itemFrame.Parent = scrollFrame
+
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 21)
+			corner.Parent = itemFrame
+
+			local imageButton = Instance.new("ImageButton")
+			imageButton.Name = "ImageButton"
+			imageButton.Size = UDim2.new(0.601, 0, 0.601, 0)
+			imageButton.Position = UDim2.new(0.199, 0, 0.199, 0)
+			imageButton.BackgroundTransparency = 1
+			imageButton.BorderSizePixel = 0
+			imageButton.Image = imageId
+			imageButton.ScaleType = Enum.ScaleType.Fit
+			imageButton.Parent = itemFrame
+
+			imageButton.Activated:Connect(function()
+				startPlacement(modelName)
+			end)
+
+			local nameLabel = Instance.new("TextLabel")
+			nameLabel.Name = "NameLabel"
+			nameLabel.Size = UDim2.new(0.953, 0, 0.248, 0)
+			nameLabel.Position = UDim2.new(0.043, 0, -0.01, 0)
+			nameLabel.Text = modelName
+			nameLabel.TextColor3 = Color3.fromRGB(31, 114, 238)
+			nameLabel.BackgroundTransparency = 1
+			nameLabel.BorderSizePixel = 0
+			nameLabel.TextScaled = true
+			nameLabel.Font = Enum.Font.SourceSansBold
+			nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+			nameLabel.TextYAlignment = Enum.TextYAlignment.Center
+			nameLabel.Parent = itemFrame
+
+			local priceLabel = Instance.new("TextLabel")
+			priceLabel.Name = "PriceLabel"
+			priceLabel.Size = UDim2.new(0.953, 0, 0.248, 0)
+			priceLabel.Position = UDim2.new(0.014, 0, 0.748, 0)
+			priceLabel.Text = "$" .. tostring(cost)
+			priceLabel.TextColor3 = Color3.fromRGB(31, 114, 238)
+			priceLabel.BackgroundTransparency = 1
+			priceLabel.BorderSizePixel = 0
+			priceLabel.TextScaled = true
+			priceLabel.TextSize = 14
+			priceLabel.Font = Enum.Font.SourceSansBold
+			priceLabel.TextWrapped = true
+			priceLabel.TextXAlignment = Enum.TextXAlignment.Center
+			priceLabel.TextYAlignment = Enum.TextYAlignment.Center
+			priceLabel.Parent = itemFrame
 		end
 	end
 
-	return nil
+	task.wait()
+	updateCanvas()
 end
 
-for _, ui in ipairs(scrollingFrame:GetDescendants()) do
-	if ui:IsA("ImageButton") or ui:IsA("TextButton") then
-		ui.Activated:Connect(function()
-			local modelName = resolveModelName(ui)
-			if modelName then
-				startPlacement(modelName)
-			end
-		end)
-	elseif ui:IsA("TextLabel") then
-		-- Permite usar TextLabel como selector rápido (ej. label "Droppers").
-		ui.Active = true
-		ui.InputBegan:Connect(function(input)
-			if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-			local modelName = resolveModelName(ui)
-			if modelName then
-				startPlacement(modelName)
-			end
-		end)
+populateScrollFromFolder(scrollingDropper, "Marble Droppers")
+if scrollingObject then
+	populateScrollFromFolder(scrollingObject, "Decorations")
+end
+
+local function connectContainer(container)
+	for _, ui in ipairs(container:GetDescendants()) do
+		if ui:IsA("ImageButton") or ui:IsA("TextButton") then
+			ui.Activated:Connect(function()
+				local modelName = resolveModelName(ui)
+				if modelName then startPlacement(modelName) end
+			end)
+		elseif ui:IsA("TextLabel") then
+			ui.Active = true
+			ui.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					local modelName = resolveModelName(ui)
+					if modelName then startPlacement(modelName) end
+				end
+			end)
+		end
+	end
+end
+
+connectContainer(scrollingDropper)
+if scrollingObject then
+	connectContainer(scrollingObject)
+end
+
+local categoryMap = {
+	["Marble Droppers"] = scrollingDropper,
+	["Decorations"] = scrollingObject
+}
+
+for _, child in ipairs(gui:GetDescendants()) do
+	if child:IsA("TextButton") then
+		local buttonText = child.Text
+		if buttonText and categoryMap[buttonText] then
+			child.Activated:Connect(function()
+				scrollingDropper.Visible = false
+				if scrollingObject then scrollingObject.Visible = false end
+				local targetScroll = categoryMap[buttonText]
+				if targetScroll then
+					targetScroll.Visible = true
+				end
+				stopPlacement()
+				setToolMode("place")
+			end)
+		end
 	end
 end
 
 local function connectToolButton(button, modeName)
 	if not button then return end
-	if not (button:IsA("TextButton") or button:IsA("ImageButton")) then return end
-
+	if not button:IsA("TextButton") then return end
 	button.Activated:Connect(function()
 		if not isBuildModeEnabled() then return end
 		if activeToolMode == modeName then
@@ -408,7 +502,6 @@ end)
 
 UIS.InputBegan:Connect(function(input, gp)
 	if gp then return end
-
 	if not isBuildModeEnabled() then
 		stopPlacement()
 		setToolMode("place")
@@ -429,7 +522,6 @@ UIS.InputBegan:Connect(function(input, gp)
 			end
 			return
 		end
-
 		if activeGhost and currentModelName and activeIsValid then
 			local primary = activeGhost.PrimaryPart
 			if primary then

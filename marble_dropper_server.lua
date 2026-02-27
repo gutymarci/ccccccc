@@ -13,6 +13,7 @@
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 if not RunService:IsServer() then
 	return
@@ -29,8 +30,60 @@ end
 
 local MarbleModule = require(marbleModuleScript)
 local DROP_INTERVAL = 2 -- segundos entre marbles por dropper
+local COINS_PER_MARBLE = 1
 
 local activeDroppers = {}
+
+local function findOwnerPlayerFromDropper(dropperModel)
+	local current = dropperModel
+	while current and current ~= workspace do
+		if current:IsA("Folder") then
+			local ownerUserId = current:GetAttribute("OwnerUserId")
+			if type(ownerUserId) == "number" then
+				return Players:GetPlayerByUserId(ownerUserId)
+			end
+
+			local ownerValue = current:FindFirstChild("Owner")
+			if ownerValue then
+				local value = ownerValue.Value
+				if typeof(value) == "Instance" and value:IsA("Player") then
+					return value
+				end
+				if typeof(value) == "number" then
+					return Players:GetPlayerByUserId(value)
+				end
+				if typeof(value) == "string" then
+					local userId = tonumber(value)
+					if userId then
+						return Players:GetPlayerByUserId(userId)
+					end
+				end
+			end
+		end
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function awardCoinsForMarble(dropperModel)
+	local ownerPlayer = findOwnerPlayerFromDropper(dropperModel)
+	if not ownerPlayer then
+		return
+	end
+
+	local leaderstats = ownerPlayer:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return
+	end
+
+	local coins = leaderstats:FindFirstChild("Coins")
+	if not coins then
+		return
+	end
+
+	coins.Value += COINS_PER_MARBLE
+end
 
 local function isDropperModel(instance)
 	if not instance or not instance:IsA("Model") then
@@ -48,7 +101,10 @@ end
 local function runDropperLoop(dropperModel)
 	task.spawn(function()
 		while dropperModel.Parent and activeDroppers[dropperModel] do
-			MarbleModule.CreateMarble(dropperModel)
+			local marble = MarbleModule.CreateMarble(dropperModel)
+			if marble then
+				awardCoinsForMarble(dropperModel)
+			end
 			task.wait(DROP_INTERVAL)
 		end
 

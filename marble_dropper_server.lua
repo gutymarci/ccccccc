@@ -29,10 +29,12 @@ if not marbleModuleScript then
 end
 
 local MarbleModule = require(marbleModuleScript)
+local DropperRewards = require(ReplicatedStorage:WaitForChild("DropperRewards"))
 local DROP_INTERVAL = 2 -- segundos entre marbles por dropper
 local COINS_PER_MARBLE = 1
 
 local activeDroppers = {}
+
 
 local function findOwnerPlayerFromDropper(dropperModel)
 	local current = dropperModel
@@ -67,22 +69,28 @@ local function findOwnerPlayerFromDropper(dropperModel)
 end
 
 local function awardCoinsForMarble(dropperModel)
+	local reward = DropperRewards.GetRewardForDropper(dropperModel)
+	if reward <= 0 then
+		return 0
+	end
+
 	local ownerPlayer = findOwnerPlayerFromDropper(dropperModel)
 	if not ownerPlayer then
-		return
+		return 0
 	end
 
 	local leaderstats = ownerPlayer:FindFirstChild("leaderstats")
 	if not leaderstats then
-		return
+		return 0
 	end
 
 	local coins = leaderstats:FindFirstChild("Coins")
 	if not coins then
-		return
+		return 0
 	end
 
-	coins.Value += COINS_PER_MARBLE
+	coins.Value += reward
+	return reward
 end
 
 local function isDropperModel(instance)
@@ -99,17 +107,20 @@ local function isDropperModel(instance)
 end
 
 local function runDropperLoop(dropperModel)
-	task.spawn(function()
-		while dropperModel.Parent and activeDroppers[dropperModel] do
-			local marble = MarbleModule.CreateMarble(dropperModel)
+		task.spawn(function()
+			while dropperModel.Parent and activeDroppers[dropperModel] do
+				local marble = MarbleModule.CreateMarble(dropperModel)
 			if marble then
-				awardCoinsForMarble(dropperModel)
+				local reward = awardCoinsForMarble(dropperModel)
+				if reward > 0 then
+					marble:SetAttribute("CoinReward", reward)
+				end
 			end
-			task.wait(DROP_INTERVAL)
-		end
+				task.wait(DROP_INTERVAL)
+			end
 
-		activeDroppers[dropperModel] = nil
-	end)
+			activeDroppers[dropperModel] = nil
+		end)
 end
 
 local function registerDropper(dropperModel)

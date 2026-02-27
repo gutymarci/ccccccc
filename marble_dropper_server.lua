@@ -29,10 +29,12 @@ if not marbleModuleScript then
 end
 
 local MarbleModule = require(marbleModuleScript)
+local DropperRewards = require(ReplicatedStorage:WaitForChild("DropperRewards"))
 local DROP_INTERVAL = 2 -- segundos entre marbles por dropper
 local COINS_PER_MARBLE = 1
 
 local activeDroppers = {}
+
 
 local function findOwnerPlayerFromDropper(dropperModel)
 	local current = dropperModel
@@ -67,6 +69,11 @@ local function findOwnerPlayerFromDropper(dropperModel)
 end
 
 local function awardCoinsForMarble(dropperModel)
+	local reward = DropperRewards.GetRewardForDropper(dropperModel)
+	if reward <= 0 then
+		return
+	end
+
 	local ownerPlayer = findOwnerPlayerFromDropper(dropperModel)
 	if not ownerPlayer then
 		return
@@ -82,7 +89,7 @@ local function awardCoinsForMarble(dropperModel)
 		return
 	end
 
-	coins.Value += COINS_PER_MARBLE
+	coins.Value += reward
 end
 
 local function isDropperModel(instance)
